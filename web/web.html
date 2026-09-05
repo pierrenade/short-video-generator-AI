@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shorts Generator</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 48px 20px;
+    background: #ffffff;
+    color: #111111;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 480px; margin: 0 auto; }
+
+  .field { margin-bottom: 18px; }
+  label { display: block; margin-bottom: 6px; font-size: 13px; color: #333; }
+  .hint { font-size: 12px; color: #888; margin-top: 4px; }
+
+  textarea, input[type="text"], input[type="number"], select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #ccc;
+    border-radius: 2px;
+    font-size: 14px;
+    font-family: inherit;
+    color: #111;
+    background: #fff;
+  }
+  textarea {
+    min-height: 90px;
+    resize: vertical;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 13px;
+  }
+  textarea:focus-visible, input:focus-visible, select:focus-visible {
+    outline: 2px solid #111;
+    outline-offset: 1px;
+    border-color: #111;
+  }
+
+  .row { display: flex; gap: 12px; }
+  .row .field { flex: 1; }
+  @media (max-width: 480px) {
+    .row { flex-direction: column; gap: 0; }
+  }
+
+  .checkbox-row { display: flex; align-items: center; gap: 8px; }
+  .checkbox-row input { width: auto; }
+  .checkbox-row label { margin-bottom: 0; }
+
+  .error { font-size: 12px; color: #c0392b; margin-top: 6px; display: none; }
+  .error.visible { display: block; }
+
+  button {
+    padding: 9px 18px;
+    background: #111;
+    color: #fff;
+    border: none;
+    border-radius: 2px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  button:hover { background: #333; }
+  button:disabled { background: #999; cursor: default; }
+  button:focus-visible { outline: 2px solid #111; outline-offset: 2px; }
+
+  .preview {
+    margin-top: 22px;
+    padding: 10px 12px;
+    background: #f7f7f7;
+    border: 1px solid #e5e5e5;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: #444;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  .log { margin-top: 24px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; }
+  .log-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 5px 0;
+    border-bottom: 1px solid #eee;
+    color: #999;
+  }
+  .log-row.done { color: #111; }
+  .log-row.failed { color: #c0392b; cursor: help; }
+  .log-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .note { font-size: 12px; color: #888; margin-top: 26px; display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <form id="form">
+    <div class="field">
+      <label for="urls">Videos</label>
+      <textarea id="urls" placeholder="One per line — YouTube link or local file path"></textarea>
+      <p class="error" id="urlsError">Add at least one link or file path</p>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label for="n">Clips (--n)</label>
+        <input type="number" id="n" min="1" max="10" value="3">
+      </div>
+      <div class="field">
+        <label for="ratio">Ratio (--ratio)</label>
+        <input type="text" id="ratio" value="9:16">
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label for="resolution">Resolution (--resolution)</label>
+        <select id="resolution">
+          <option value="360">360</option>
+          <option value="480">480</option>
+          <option value="720" selected>720</option>
+          <option value="1080">1080</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="language">Language (--language)</label>
+        <input type="text" id="language" placeholder="auto">
+        <p class="hint">Whisper language code, e.g. en, zh. Leave blank for auto-detect.</p>
+      </div>
+    </div>
+
+    <div class="field checkbox-row">
+      <input type="checkbox" id="hook" checked>
+      <label for="hook">Add AI-generated hook (unchecking sets --no-hook)</label>
+    </div>
+
+    <button type="submit" id="generateBtn">Generate</button>
+
+    <div class="preview" id="preview"></div>
+  </form>
+
+  <div class="log" id="log"></div>
+  <p class="note" id="outputNote">Clips are saved to the <code>output</code> folder.</p>
+
+</div>
+
+<script>
+(function () {
+  var form = document.getElementById('form');
+  var urlsEl = document.getElementById('urls');
+  var urlsError = document.getElementById('urlsError');
+  var nEl = document.getElementById('n');
+  var ratioEl = document.getElementById('ratio');
+  var resolutionEl = document.getElementById('resolution');
+  var languageEl = document.getElementById('language');
+  var hookEl = document.getElementById('hook');
+  var preview = document.getElementById('preview');
+  var log = document.getElementById('log');
+  var generateBtn = document.getElementById('generateBtn');
+  var outputNote = document.getElementById('outputNote');
+
+  function targets() {
+    return urlsEl.value.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+  }
+
+  function buildCommand(target) {
+    var parts = ['python main.py "' + target + '"'];
+    parts.push('--n ' + (nEl.value || 3));
+    parts.push('--ratio ' + (ratioEl.value || '9:16'));
+    parts.push('--resolution ' + resolutionEl.value);
+    if (languageEl.value.trim()) parts.push('--language ' + languageEl.value.trim());
+    if (!hookEl.checked) parts.push('--no-hook');
+    return parts.join(' ');
+  }
+
+  function updatePreview() {
+    var list = targets();
+    preview.textContent = buildCommand(list.length ? list[0] : '<video>');
+  }
+  [nEl, ratioEl, resolutionEl, languageEl, hookEl, urlsEl].forEach(function (el) {
+    el.addEventListener('input', updatePreview);
+  });
+  updatePreview();
+
+  var API_BASE = 'http://localhost:5000';
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var list = targets();
+    if (!list.length) {
+      urlsError.classList.add('visible');
+      urlsEl.focus();
+      return;
+    }
+    urlsError.classList.remove('visible');
+    generateBtn.disabled = true;
+    outputNote.style.display = 'none';
+    log.innerHTML = '';
+
+    var rows = list.map(function (target) {
+      var row = document.createElement('div');
+      row.className = 'log-row';
+      var pathSpan = document.createElement('span');
+      pathSpan.className = 'log-path';
+      pathSpan.textContent = target;
+      var statusSpan = document.createElement('span');
+      statusSpan.textContent = 'queued';
+      row.appendChild(pathSpan);
+      row.appendChild(statusSpan);
+      log.appendChild(row);
+      return { target: target, row: row, status: statusSpan };
+    });
+
+    runQueue(rows, 0);
+  });
+
+  function runQueue(rows, i) {
+    if (i >= rows.length) {
+      generateBtn.disabled = false;
+      outputNote.style.display = 'block';
+      return;
+    }
+    var item = rows[i];
+    item.status.textContent = 'processing…';
+
+    fetch(API_BASE + '/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        target: item.target,
+        n: Number(nEl.value) || 3,
+        ratio: ratioEl.value || '9:16',
+        resolution: resolutionEl.value,
+        language: languageEl.value.trim(),
+        hook: hookEl.checked
+      })
+    })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (data.success) {
+          var count = data.output_files.length;
+          item.status.textContent = 'done (' + count + ' file' + (count === 1 ? '' : 's') + ')';
+          item.row.classList.add('done');
+        } else {
+          item.status.textContent = 'failed';
+          item.row.classList.add('failed');
+          item.row.title = data.log || 'Check the server terminal for details.';
+        }
+      })
+      .catch(function (err) {
+        item.status.textContent = 'server unreachable';
+        item.row.classList.add('failed');
+        item.row.title = 'Is server.py running on ' + API_BASE + '? (' + err.message + ')';
+      })
+      .finally(function () {
+        runQueue(rows, i + 1);
+      });
+  }
+})();
+</script>
+</body>
+</html>
