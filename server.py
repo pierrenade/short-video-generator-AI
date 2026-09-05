@@ -6,7 +6,8 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
- 
+
+fs.run_sync()
 APP_ROOT = Path(__file__).parent
 MAIN_SCRIPT = APP_ROOT / "main.py"
 OUTPUT_DIR = APP_ROOT / "output"
